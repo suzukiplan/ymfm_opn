@@ -30,6 +30,11 @@ Add [vgmdrv.hpp](./vgmdrv.hpp) and [ymfm_opn2.hpp](./ymfm_opn2.hpp) to your proj
 
 Since there is no code (.c or .cpp) that depends on anything other than the header files, it should be easy to integrate!
 
+## Restrictions
+
+- The VGM commands implemented by vgmdrv are minimal. If your created VGM causes an error with `“Detected an unknown VGM command: xx”`, you must add the necessary commands.
+- We haven't verified this yet, but the DAC for channel 6 likely isn't currently supported.
+
 ## License
 
 [3-Clause BSD](./LICENSE)
