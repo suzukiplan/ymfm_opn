@@ -48,32 +48,55 @@ std::map<int, std::string> chips = {
     {0xE4, "Mikey"},
 };
 
-std::vector<std::string> chips_supported = {"YM2612"};
+enum class ChipType {
+    YM2612,
+    Unsupported
+};
+
+std::vector<ChipType> chips_supported = {ChipType::YM2612};
+
+static ChipType getChipType(std::string chipName)
+{
+    if (chipName == "YM2612") {
+        return ChipType::YM2612;
+    }
+    return ChipType::Unsupported;
+}
 
 class VgmDriver : public ymfm::ymfm_interface
 {
   private:
-    ymfm::ym2612 fm;
+    ymfm::ym2612 ym2612;
 
     struct Context {
         uint32_t version;
         const uint8_t* data;
         size_t size;
-        std::map<std::string, uint32_t> clocks;
         int32_t cursor;
         int32_t loopOffset;
+        int32_t wait;
+        uint32_t loopCount;
+        bool end;
     } vgm;
 
+    std::map<ChipType, uint32_t> clocks;
+
   public:
-    VgmDriver() : fm(*this)
+    VgmDriver() : ym2612(*this)
     {
+        this->reset();
     }
 
     ~VgmDriver()
     {
     }
 
-    void reset() { this->fm.reset(); }
+    void reset()
+    {
+        memset(&this->vgm, 0, sizeof(this->vgm));
+        this->clocks.clear();
+        this->ym2612.reset();
+    }
 
     bool load(const uint8_t* data, size_t size)
     {
@@ -102,16 +125,14 @@ class VgmDriver : public ymfm::ymfm_interface
                 memcpy(&clocks, &data[it->first], 4);
                 if (clocks) {
                     printf("Detected %s clocks: %uHz ", it->second.c_str(), clocks);
-                    bool detect = false;
-                    for (auto chip : chips_supported) {
-                        if (chip == it->second) {
-                            detect = true;
-                            break;
-                        }
-                    }
-                    if (detect) {
+                    auto type = getChipType(it->second);
+                    if (type != ChipType::Unsupported) {
                         printf("<supported>\n");
-                        this->vgm.clocks[it->second] = clocks;
+                        this->clocks[type] = clocks;
+                        switch (type) {
+                            case ChipType::YM2612: this->ym2612.sample_rate(clocks); break;
+                            case ChipType::Unsupported: break;
+                        }
                         detect_supported = true;
                     } else {
                         printf("<unsupported!>\n");
@@ -125,52 +146,148 @@ class VgmDriver : public ymfm::ymfm_interface
         }
 
         memcpy(&vgm.cursor, &data[0x34], 4);
-        vgm.cursor += 0x40 - 0x0C;
+        vgm.cursor += 0x34;
         memcpy(&vgm.loopOffset, &data[0x1C], 4);
         vgm.loopOffset += vgm.loopOffset ? 0x1C : 0;
         return true;
     }
 
-  public:
-    //
-    // timing and synchronizaton
-    //
+    void render(int16_t* buf, int samples)
+    {
+        if (!vgm.data) {
+            memset(buf, 0, samples * 2);
+            return;
+        }
+        int cursor = 0;
+        while (cursor < samples) {
+            if (vgm.wait < 1) {
+                this->execute();
+            }
+            vgm.wait--;
+            buf[cursor] = 0;
+            for (auto it = this->clocks.begin(); it != this->clocks.end(); it++) {
+                switch (it->first) {
+                    case ChipType::YM2612: {
+                        ymfm::ym2612::output_data out;
+                        ym2612.generate(&out);
+                        if (0x1F8 != out.data[0]) {
+                            puts("FOO");
+                        }
+                        buf[cursor] += out.data[0]; // output left channel only (mono)
+                        break;
+                    }
+                    case ChipType::Unsupported:
+                        break;
+                }
+            }
+            cursor++;
+        }
+    }
 
-    // the chip implementation calls this when a write happens to the mode
-    // register, which could affect timers and interrupts; our responsibility
-    // is to ensure the system is up to date before calling the engine's
-    // engine_mode_write() method
-    virtual void ymfm_sync_mode_write(uint8_t data) { m_engine->engine_mode_write(data); }
+    inline uint32_t getLoopCount() { return this->vgm.loopCount; }
+    inline bool isEnded() { return this->vgm.end; }
 
-    // the chip implementation calls this when the chip's status has changed,
-    // which may affect the interrupt state; our responsibility is to ensure
-    // the system is up to date before calling the engine's
-    // engine_check_interrupts() method
-    virtual void ymfm_sync_check_interrupts() { m_engine->engine_check_interrupts(); }
+  private:
+    void execute()
+    {
+        if (!vgm.data || vgm.end) {
+            return;
+        }
+        static uint32_t seq;
+        while (vgm.wait < 1) {
+            uint8_t cmd = vgm.data[vgm.cursor++];
+            switch (cmd) {
+                case 0x52:
+                case 0xA2: {
+                    // YM2612 port 0, write value dd to register aa
+                    int aa = vgm.data[vgm.cursor++];
+                    int dd = vgm.data[vgm.cursor++];
+                    ym2612.write(aa, dd);
+                    break;
+                }
+                case 0x53:
+                case 0xA3: {
+                    // YM2612 port 1, write value dd to register aa
+                    int aa = vgm.data[vgm.cursor++];
+                    int dd = vgm.data[vgm.cursor++];
+                    ym2612.write(aa | 0x100, dd);
+                    break;
+                }
 
-    // the chip implementation calls this when one of the two internal timers
-    // has changed state; our responsibility is to arrange to call the engine's
-    // engine_timer_expired() method after the provided number of clocks; if
-    // duration_in_clocks is negative, we should cancel any outstanding timers
-    virtual void ymfm_set_timer(uint32_t tnum, int32_t duration_in_clocks) {}
+                case 0x61: {
+                    // Wait nn samples
+                    unsigned short nn;
+                    memcpy(&nn, &vgm.data[vgm.cursor], 2);
+                    vgm.cursor += 2;
+                    vgm.wait += nn;
+                    break;
+                }
+                case 0x62: vgm.wait += 735; break;
+                case 0x63: vgm.wait += 882; break;
+                case 0x66: {
+                    // End of sound data
+                    if (vgm.loopOffset) {
+                        vgm.cursor = vgm.loopOffset;
+                        vgm.loopCount++;
+                        break;
+                    } else {
+                        vgm.end = true;
+                        return;
+                    }
+                }
 
-    // the chip implementation calls this to indicate that the chip should be
-    // considered in a busy state until the given number of clocks has passed;
-    // our responsibility is to compute and remember the ending time based on
-    // the chip's clock for later checking
-    virtual void ymfm_set_busy_end(uint32_t clocks) {}
+                case 0x90: // Setup Stream Control: 0x90 ss tt pp cc (ignore)
+                case 0x91: // Set Stream Data: 0x91 ss dd ll bb (ignore)
+                case 0x95: // Start Stream (fast call): 0x95 ss bb bb ff
+                    // printf("[DAC]0x%02X: %02X %02X %02X %02X\n", cmd, vgm.data[0], vgm.data[1], vgm.data[2], vgm.data[3]);
+                    vgm.cursor += 4;
+                    break;
 
-    // the chip implementation calls this to see if the chip is still currently
-    // is a busy state, as specified by a previous call to ymfm_set_busy_end();
-    // our responsibility is to compare the current time against the previously
-    // noted busy end time and return true if we haven't yet passed it
-    virtual bool ymfm_is_busy() { return false; }
+                case 0x92: // Set Stream Frequency: 0x92 ss ff ff ff ff (ignore)
+                    // printf("[DAC]0x%02X: %02X %02X %02X %02X %02X\n", cmd, vgm.data[0], vgm.data[1], vgm.data[2], vgm.data[3], vgm.data[4]);
+                    vgm.cursor += 5;
+                    break;
+
+                case 0x93: // Start Stream: 0x93 ss aa aa aa aa mm ll ll ll ll (ignored)
+                    // printf("[DAC]0x%02X: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n", cmd, vgm.data[0], vgm.data[1], vgm.data[2], vgm.data[3], vgm.data[4], vgm.data[5], vgm.data[6], vgm.data[7], vgm.data[8], vgm.data[9]);
+                    vgm.cursor += 10;
+                    break;
+
+                case 0x94: // Stop Stream: 0x94 ss
+                    // printf("[DAC]0x%02X: %02X\n", cmd, vgm.data[0]);
+                    vgm.cursor++;
+                    break;
+
+                default:
+                    // unsupported command
+                    printf("Detected an unknown VGM command: %02X\n", cmd);
+                    vgm.end = true;
+                    return;
+            }
+        }
+    }
 };
+
+typedef struct {
+    char riff[4];
+    unsigned int fsize;
+    char wave[4];
+    char fmt[4];
+    unsigned int bnum;
+    unsigned short fid;
+    unsigned short ch;
+    unsigned int sample;
+    unsigned int bps;
+    unsigned short bsize;
+    unsigned short bits;
+    char data[4];
+    unsigned int dsize;
+} WavHeader;
 
 int main(int argc, char* argv[])
 {
-    if (argc < 2) {
-        puts("usage: example /path/to/file.vgm");
+    if (argc < 3) {
+        puts("usage: example /path/to/file.vgm /path/to/output.wav");
         return 1;
     }
     std::ifstream in(argv[1], std::ios::binary | std::ios::ate);
@@ -190,5 +307,42 @@ int main(int argc, char* argv[])
         puts("Load failed!");
         return -2;
     }
+
+    std::vector<int16_t> wav;
+    while (0 == vgmdrv.getLoopCount() && !vgmdrv.isEnded()) {
+        int16_t work[4096];
+        vgmdrv.render(work, sizeof(work) / 2);
+        for (int i = 0; i < 4096; i++) {
+            wav.push_back(work[i]);
+        }
+    }
+    printf("%zu samples generated.\n", wav.size());
+
+    puts("Writing a wav file...");
+    WavHeader wh;
+    memset(&wh, 0, sizeof(wh));
+    strncpy(wh.riff, "RIFF", 4);
+    strncpy(wh.wave, "WAVE", 4);
+    strncpy(wh.fmt, "fmt ", 4);
+    strncpy(wh.data, "data", 4);
+    wh.bnum = 16;
+    wh.fid = 1;
+    wh.ch = 1;
+    wh.sample = 44100;
+    wh.bps = 88200;
+    wh.bsize = 2;
+    wh.bits = 16;
+    wh.dsize = wav.size() * 2;
+    wh.fsize = wh.dsize + sizeof(wh) - 8;
+
+    FILE* fw = fopen(argv[2], "wb");
+    if (!fw) {
+        puts("File open error!");
+        return -1;
+    }
+    fwrite(&wh, 1, sizeof(wh), fw);
+    fwrite(wav.data(), 1, wav.size() * 2, fw);
+    fclose(fw);
+
     return 0;
 }
