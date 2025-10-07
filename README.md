@@ -23,6 +23,12 @@ Detected YM2612: clocks=7670454Hz <supported>
 Writing a wav file...
 ```
 
+## How to integrate to your Project
+
+Add [vgmdrv.hpp](./vgmdrv.hpp) and [ymfm_opn2.hpp](./ymfm_opn2.hpp) to your project and include them with `#include “vgmdrv.hpp”`.
+
+Since there is no code (.c or .cpp) that depends on anything other than the header files, it should be easy to integrate!
+
 ## License
 
 [3-Clause BSD](./LICENSE)
