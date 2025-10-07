@@ -1,6 +1,6 @@
 # Extract an OPN2 from ymfm
 
-This code extracts only the classes necessary for emulating the OPN2 from [ymfm](./ymfm/), and modifies it into a single-header format while including its dependency code.
+This code extracts only the classes necessary for emulating the OPN2 from [ymfm](https://github.com/aaronsgiles/ymfm/tree/17decfae857b92ab55fbb30ade2287ace095a381), and modifies it into a single-header format while including its dependency code.
  
 ## How to use
 
