@@ -36,7 +36,7 @@
 #include <vector>
 #include <iostream>
 #include <fstream>
-#include "ymfm_opn.hpp"
+#include "ymfm_opn2.hpp"
 
 // we use an int64_t as emulated time, as a 32.32 fixed point value
 using emulated_time = int64_t;
