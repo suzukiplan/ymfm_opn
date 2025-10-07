@@ -67,6 +67,7 @@ class VgmDriver : public ymfm::ymfm_interface
 {
   private:
     ymfm::ym2612 ym2612;
+    std::vector<std::pair<uint32_t, uint8_t>> ym2612_queue;
 
     struct Context {
         uint32_t version;
@@ -96,6 +97,7 @@ class VgmDriver : public ymfm::ymfm_interface
         memset(&this->vgm, 0, sizeof(this->vgm));
         this->clocks.clear();
         this->ym2612.reset();
+        this->ym2612_queue.clear();
     }
 
     bool load(const uint8_t* data, size_t size)
@@ -168,6 +170,25 @@ class VgmDriver : public ymfm::ymfm_interface
             for (auto it = this->clocks.begin(); it != this->clocks.end(); it++) {
                 switch (it->first) {
                     case ChipType::YM2612: {
+                        uint32_t addr1 = 0xffff, addr2 = 0xffff;
+                        uint8_t data1 = 0, data2 = 0;
+
+                        // see if there is data to be written; if so, extract it and dequeue
+                        if (!ym2612_queue.empty()) {
+                            auto front = ym2612_queue.front();
+                            addr1 = 0 + 2 * ((front.first >> 8) & 3);
+                            data1 = front.first & 0xff;
+                            addr2 = addr1 + 1;
+                            data2 = front.second;
+                            ym2612_queue.erase(ym2612_queue.begin());
+                        }
+
+                        // write to the chip
+                        if (addr1 != 0xffff) {
+                            ym2612.write(addr1, data1);
+                            ym2612.write(addr2, data2);
+                        }
+
                         ymfm::ym2612::output_data out;
                         ym2612.generate(&out);
                         buf[cursor] += out.data[0]; // output left channel only (mono)
@@ -197,15 +218,17 @@ class VgmDriver : public ymfm::ymfm_interface
                 case 0x52:
                 case 0xA2: {
                     // YM2612 port 0, write value dd to register aa
-                    ym2612.write_address(vgm.data[vgm.cursor++]);
-                    ym2612.write_data(vgm.data[vgm.cursor++]);
+                    uint32_t reg = vgm.data[vgm.cursor++];
+                    uint8_t data = vgm.data[vgm.cursor++];
+                    ym2612_queue.push_back(std::make_pair(reg, data));
                     break;
                 }
                 case 0x53:
                 case 0xA3: {
                     // YM2612 port 1, write value dd to register aa
-                    ym2612.write_address_hi(vgm.data[vgm.cursor++]);
-                    ym2612.write_data_hi(vgm.data[vgm.cursor++]);
+                    uint32_t reg = vgm.data[vgm.cursor++];
+                    uint8_t data = vgm.data[vgm.cursor++];
+                    ym2612_queue.push_back(std::make_pair(reg | 0x100, data));
                     break;
                 }
 
