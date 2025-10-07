@@ -1,4 +1,4 @@
-# ymfm - extracted YM2612 only
+# ymfm - extracted OPN only
 
 This code extracts only the classes necessary for emulating the OPN from [ymfm](./ymfm/), and modifies it into a single-header format while including its dependency code.
  
