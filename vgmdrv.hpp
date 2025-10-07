@@ -93,8 +93,6 @@ enum class ChipType {
     Unsupported
 };
 
-std::vector<ChipType> chips_supported = {ChipType::YM2612};
-
 static ChipType getChipType(std::string chipName)
 {
     if (chipName == "YM2612") {
