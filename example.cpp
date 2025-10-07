@@ -170,9 +170,6 @@ class VgmDriver : public ymfm::ymfm_interface
                     case ChipType::YM2612: {
                         ymfm::ym2612::output_data out;
                         ym2612.generate(&out);
-                        if (0x1F8 != out.data[0]) {
-                            puts("FOO");
-                        }
                         buf[cursor] += out.data[0]; // output left channel only (mono)
                         break;
                     }
@@ -203,6 +200,8 @@ class VgmDriver : public ymfm::ymfm_interface
                     int aa = vgm.data[vgm.cursor++];
                     int dd = vgm.data[vgm.cursor++];
                     ym2612.write(aa, dd);
+                    static uint32_t seq;
+                    printf("ym2612.write(0x52): aa=%02X, dd=%02X (%d)\n", aa, dd, ++seq);
                     break;
                 }
                 case 0x53:
@@ -211,6 +210,8 @@ class VgmDriver : public ymfm::ymfm_interface
                     int aa = vgm.data[vgm.cursor++];
                     int dd = vgm.data[vgm.cursor++];
                     ym2612.write(aa | 0x100, dd);
+                    static uint32_t seq;
+                    printf("ym2612.write(0x53): aa=%02X, dd=%02X (%d)\n", aa, dd, ++seq);
                     break;
                 }
 
