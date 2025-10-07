@@ -9,7 +9,8 @@ Check the [example.cpp](./example.cpp).
 You can build and run the application by executing the following command.
 
 ```bash
-git clone https://github.com/suzukiplan/ymfm_opn
+git clone https://github.com/suzukiplan/ymfm_opn2
+cd ymfm_opn2
 make
 ```
 
