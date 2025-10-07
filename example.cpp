@@ -3,7 +3,7 @@
 #include <vector>
 #include <iostream>
 #include <fstream>
-#include "ymfm_ym2612.hpp"
+#include "ymfm_opn.hpp"
 
 std::map<int, std::string> chips = {
     {0x2C, "YM2612"},
@@ -312,9 +312,8 @@ int main(int argc, char* argv[])
     while (0 == vgmdrv.getLoopCount() && !vgmdrv.isEnded()) {
         int16_t work[4096];
         vgmdrv.render(work, sizeof(work) / 2);
-        for (int i = 0; i < 4096; i++) {
-            wav.push_back(work[i]);
-        }
+        wav.reserve(wav.size() + sizeof(work) / 2);
+        wav.insert(wav.end(), std::begin(work), std::end(work));
     }
     printf("%zu samples generated.\n", wav.size());
 
