@@ -1,4 +1,4 @@
-# [WIP] ymfm - extracted OPN only
+# Extract an OPN2 from ymfm
 
 This code extracts only the classes necessary for emulating the OPN2 from [ymfm](./ymfm/), and modifies it into a single-header format while including its dependency code.
  
