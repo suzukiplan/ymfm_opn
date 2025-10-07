@@ -34,7 +34,9 @@ int main(int argc, char* argv[])
         return -1;
     }
 
-    VgmDriver vgmdrv;
+    const int sampling_rate = 44100;
+    const int channels = 1;
+    VgmDriver vgmdrv(sampling_rate, channels);
     if (!vgmdrv.load(buf.data(), buf.size())) {
         puts("Load failed!");
         return -2;
@@ -58,11 +60,11 @@ int main(int argc, char* argv[])
     strncpy(wh.data, "data", 4);
     wh.bnum = 16;
     wh.fid = 1;
-    wh.ch = 1;
-    wh.sample = 44100;
-    wh.bps = 88200;
+    wh.ch = channels;
+    wh.sample = sampling_rate;
     wh.bsize = 2;
     wh.bits = 16;
+    wh.bps = wh.sample * wh.ch * (wh.bits / 8);
     wh.dsize = wav.size() * 2;
     wh.fsize = wh.dsize + sizeof(wh) - 8;
 

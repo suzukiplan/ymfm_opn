@@ -123,12 +123,15 @@ class VgmDriver : public ymfm::ymfm_interface
         emulated_time step;
     } vgm;
 
-    static const emulated_time output_step = 0x100000000ull / 44100;
+    emulated_time output_step;
     std::map<ChipType, uint32_t> clocks;
+    int channels;
 
   public:
-    VgmDriver() : ym2612(*this)
+    VgmDriver(int samples, int channels) : ym2612(*this)
     {
+        this->output_step = 0x100000000ull / samples;
+        this->channels = channels;
         this->reset();
     }
 
@@ -213,6 +216,9 @@ class VgmDriver : public ymfm::ymfm_interface
             }
             vgm.wait--;
             buf[cursor] = 0;
+            if (2 <= this->channels) {
+                buf[cursor + 1] = 0;
+            }
             for (auto it = this->clocks.begin(); it != this->clocks.end(); it++) {
                 switch (it->first) {
                     case ChipType::YM2612: {
@@ -240,14 +246,18 @@ class VgmDriver : public ymfm::ymfm_interface
                             ym2612.generate(&out);
                         }
                         vgm.output_start += output_step;
-                        buf[cursor] += out.data[0]; // output left channel only (mono)
+                        if (this->channels < 2) {
+                            buf[cursor++] += out.data[0]; // output left channel only (mono)
+                        } else {
+                            buf[cursor++] += out.data[0];
+                            buf[cursor++] += out.data[1];
+                        }
                         break;
                     }
                     case ChipType::Unsupported:
                         break;
                 }
             }
-            cursor++;
         }
     }
 
