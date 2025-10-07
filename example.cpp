@@ -1,9 +1,45 @@
+// BSD 3-Clause License
+//
+// Copyright (c) 2025, Yoji Suzuki
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+#include <stdint.h>
+#include <string.h>
+#include <stdbool.h>
 #include <string>
 #include <map>
 #include <vector>
 #include <iostream>
 #include <fstream>
 #include "ymfm_opn.hpp"
+
+// we use an int64_t as emulated time, as a 32.32 fixed point value
+using emulated_time = int64_t;
 
 std::map<int, std::string> chips = {
     {0x2C, "YM2612"},
@@ -78,8 +114,12 @@ class VgmDriver : public ymfm::ymfm_interface
         int32_t wait;
         uint32_t loopCount;
         bool end;
+        emulated_time output_start;
+        emulated_time pos;
+        emulated_time step;
     } vgm;
 
+    static const emulated_time output_step = 0x100000000ull / 44100;
     std::map<ChipType, uint32_t> clocks;
 
   public:
@@ -126,13 +166,15 @@ class VgmDriver : public ymfm::ymfm_interface
                 uint32_t clocks;
                 memcpy(&clocks, &data[it->first], 4);
                 if (clocks) {
-                    printf("Detected %s clocks: %uHz ", it->second.c_str(), clocks);
+                    printf("Detected %s: clocks=%uHz ", it->second.c_str(), clocks);
                     auto type = getChipType(it->second);
                     if (type != ChipType::Unsupported) {
                         printf("<supported>\n");
                         this->clocks[type] = clocks;
                         switch (type) {
-                            case ChipType::YM2612: this->ym2612.sample_rate(clocks); break;
+                            case ChipType::YM2612:
+                                vgm.step = 0x100000000ull / this->ym2612.sample_rate(clocks);
+                                break;
                             case ChipType::Unsupported: break;
                         }
                         detect_supported = true;
@@ -190,7 +232,10 @@ class VgmDriver : public ymfm::ymfm_interface
                         }
 
                         ymfm::ym2612::output_data out;
-                        ym2612.generate(&out);
+                        for (; vgm.pos <= vgm.output_start; vgm.pos += vgm.step) {
+                            ym2612.generate(&out);
+                        }
+                        vgm.output_start += output_step;
                         buf[cursor] += out.data[0]; // output left channel only (mono)
                         break;
                     }
