@@ -197,21 +197,15 @@ class VgmDriver : public ymfm::ymfm_interface
                 case 0x52:
                 case 0xA2: {
                     // YM2612 port 0, write value dd to register aa
-                    int aa = vgm.data[vgm.cursor++];
-                    int dd = vgm.data[vgm.cursor++];
-                    ym2612.write(aa, dd);
-                    static uint32_t seq;
-                    printf("ym2612.write(0x52): aa=%02X, dd=%02X (%d)\n", aa, dd, ++seq);
+                    ym2612.write_address(vgm.data[vgm.cursor++]);
+                    ym2612.write_data(vgm.data[vgm.cursor++]);
                     break;
                 }
                 case 0x53:
                 case 0xA3: {
                     // YM2612 port 1, write value dd to register aa
-                    int aa = vgm.data[vgm.cursor++];
-                    int dd = vgm.data[vgm.cursor++];
-                    ym2612.write(aa | 0x100, dd);
-                    static uint32_t seq;
-                    printf("ym2612.write(0x53): aa=%02X, dd=%02X (%d)\n", aa, dd, ++seq);
+                    ym2612.write_address_hi(vgm.data[vgm.cursor++]);
+                    ym2612.write_data_hi(vgm.data[vgm.cursor++]);
                     break;
                 }
 
