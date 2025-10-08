@@ -268,7 +268,6 @@ class VgmDriver : public ymfm::ymfm_interface
         if (!vgm.data || vgm.end) {
             return;
         }
-        static uint32_t seq;
         while (vgm.wait < 1) {
             uint8_t cmd = vgm.data[vgm.cursor++];
             switch (cmd) {
