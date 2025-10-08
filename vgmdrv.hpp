@@ -35,77 +35,140 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
-#include <string>
-#include <map>
-#include <vector>
-#include <iostream>
-#include <fstream>
+#include <stdio.h>
 #include "ymfm_opn2.hpp"
 
 // we use an int64_t as emulated time, as a 32.32 fixed point value
 using emulated_time = int64_t;
-
-static std::map<int, std::string> chips = {
-    {0x2C, "YM2612"},
-    {0x30, "YM2151"},
-    {0x38, "Sega_PCM"},
-    {0x40, "RF5C68"},
-    {0x44, "YM2203"},
-    {0x48, "YM2608"},
-    {0x4C, "YM2610/B"},
-    {0x50, "YM3812"},
-    {0x54, "YM3526"},
-    {0x58, "Y8950"},
-    {0x5C, "YMF262"},
-    {0x60, "YMF278B"},
-    {0x64, "YMF271"},
-    {0x68, "YMZ280B"},
-    {0x6C, "RF5C164"},
-    {0x70, "PWM"},
-    {0x74, "AY8910"},
-    {0x80, "GB_DMG"},
-    {0x84, "NES_APU"},
-    {0x88, "MultiPCM"},
-    {0x8C, "uPD7759"},
-    {0x90, "OKIM6258"},
-    {0x98, "OKIM6295"},
-    {0x9C, "uPD7759"},
-    {0xA0, "K054539"},
-    {0xA4, "HuC6280"},
-    {0xA8, "C140"},
-    {0xAC, "K053260"},
-    {0xB0, "Pokey"},
-    {0xB4, "QSound"},
-    {0xB8, "SCSP"},
-    {0xC0, "WonderSwan"},
-    {0xC4, "VSU"},
-    {0xC8, "SAA1099"},
-    {0xCC, "ES5503"},
-    {0xD0, "ES5506"},
-    {0xD8, "X1-010"},
-    {0xDC, "C352"},
-    {0xE0, "GA20"},
-    {0xE4, "Mikey"},
-};
 
 enum class ChipType {
     YM2612,
     Unsupported
 };
 
-static ChipType getChipType(std::string chipName)
+#define YM2612_QUEUE_CAPACITY 4096
+
+struct ChipEntry {
+    int offset;
+    const char* name;
+    ChipType type;
+};
+
+static const ChipEntry CHIP_TABLE[] = {
+    {0x2C, "YM2612", ChipType::YM2612},
+    {0x30, "YM2151", ChipType::Unsupported},
+    {0x38, "Sega_PCM", ChipType::Unsupported},
+    {0x40, "RF5C68", ChipType::Unsupported},
+    {0x44, "YM2203", ChipType::Unsupported},
+    {0x48, "YM2608", ChipType::Unsupported},
+    {0x4C, "YM2610/B", ChipType::Unsupported},
+    {0x50, "YM3812", ChipType::Unsupported},
+    {0x54, "YM3526", ChipType::Unsupported},
+    {0x58, "Y8950", ChipType::Unsupported},
+    {0x5C, "YMF262", ChipType::Unsupported},
+    {0x60, "YMF278B", ChipType::Unsupported},
+    {0x64, "YMF271", ChipType::Unsupported},
+    {0x68, "YMZ280B", ChipType::Unsupported},
+    {0x6C, "RF5C164", ChipType::Unsupported},
+    {0x70, "PWM", ChipType::Unsupported},
+    {0x74, "AY8910", ChipType::Unsupported},
+    {0x80, "GB_DMG", ChipType::Unsupported},
+    {0x84, "NES_APU", ChipType::Unsupported},
+    {0x88, "MultiPCM", ChipType::Unsupported},
+    {0x8C, "uPD7759", ChipType::Unsupported},
+    {0x90, "OKIM6258", ChipType::Unsupported},
+    {0x98, "OKIM6295", ChipType::Unsupported},
+    {0x9C, "uPD7759", ChipType::Unsupported},
+    {0xA0, "K054539", ChipType::Unsupported},
+    {0xA4, "HuC6280", ChipType::Unsupported},
+    {0xA8, "C140", ChipType::Unsupported},
+    {0xAC, "K053260", ChipType::Unsupported},
+    {0xB0, "Pokey", ChipType::Unsupported},
+    {0xB4, "QSound", ChipType::Unsupported},
+    {0xB8, "SCSP", ChipType::Unsupported},
+    {0xC0, "WonderSwan", ChipType::Unsupported},
+    {0xC4, "VSU", ChipType::Unsupported},
+    {0xC8, "SAA1099", ChipType::Unsupported},
+    {0xCC, "ES5503", ChipType::Unsupported},
+    {0xD0, "ES5506", ChipType::Unsupported},
+    {0xD8, "X1-010", ChipType::Unsupported},
+    {0xDC, "C352", ChipType::Unsupported},
+    {0xE0, "GA20", ChipType::Unsupported},
+    {0xE4, "Mikey", ChipType::Unsupported},
+};
+
+static const ChipEntry* find_chip_entry(int offset)
 {
-    if (chipName == "YM2612") {
-        return ChipType::YM2612;
+    unsigned int count = (unsigned int)(sizeof(CHIP_TABLE) / sizeof(CHIP_TABLE[0]));
+    for (unsigned int index = 0; index < count; index++) {
+        if (CHIP_TABLE[index].offset == offset)
+            return &CHIP_TABLE[index];
     }
-    return ChipType::Unsupported;
+    return nullptr;
+}
+
+struct Ym2612QueueEntry {
+    uint32_t reg;
+    uint8_t data;
+};
+
+struct Ym2612Queue {
+    Ym2612QueueEntry entries[YM2612_QUEUE_CAPACITY];
+    int head;
+    int tail;
+    int count;
+};
+
+static inline void ym2612_queue_init(Ym2612Queue* queue)
+{
+    queue->head = 0;
+    queue->tail = 0;
+    queue->count = 0;
+}
+
+static inline void ym2612_queue_clear(Ym2612Queue* queue)
+{
+    queue->head = 0;
+    queue->tail = 0;
+    queue->count = 0;
+}
+
+static inline int ym2612_queue_empty(const Ym2612Queue* queue)
+{
+    return queue->count == 0;
+}
+
+static inline Ym2612QueueEntry ym2612_queue_front(const Ym2612Queue* queue)
+{
+    Ym2612QueueEntry empty = {0, 0};
+    if (queue->count == 0)
+        return empty;
+    return queue->entries[queue->head];
+}
+
+static inline void ym2612_queue_pop(Ym2612Queue* queue)
+{
+    if (queue->count == 0)
+        return;
+    queue->head = (queue->head + 1) % YM2612_QUEUE_CAPACITY;
+    queue->count--;
+}
+
+static inline void ym2612_queue_push(Ym2612Queue* queue, uint32_t reg, uint8_t data)
+{
+    if (queue->count >= YM2612_QUEUE_CAPACITY)
+        return;
+    queue->entries[queue->tail].reg = reg;
+    queue->entries[queue->tail].data = data;
+    queue->tail = (queue->tail + 1) % YM2612_QUEUE_CAPACITY;
+    queue->count++;
 }
 
 class VgmDriver : public ymfm::ymfm_interface
 {
   private:
     ymfm::ym2612 ym2612;
-    std::vector<std::pair<uint32_t, uint8_t>> ym2612_queue;
+    Ym2612Queue ym2612_queue;
 
     struct Context {
         uint32_t version;
@@ -122,14 +185,18 @@ class VgmDriver : public ymfm::ymfm_interface
     } vgm;
 
     emulated_time output_step;
-    std::map<ChipType, uint32_t> clocks;
+    uint32_t ym2612_clock;
+    bool ym2612_present;
     int channels;
 
   public:
     VgmDriver(int samples = 44100, int channels = 2) : ym2612(*this)
     {
+        ym2612_queue_init(&this->ym2612_queue);
         this->output_step = 0x100000000ull / samples;
         this->channels = channels;
+        this->ym2612_clock = 0;
+        this->ym2612_present = false;
         this->reset();
     }
 
@@ -140,9 +207,10 @@ class VgmDriver : public ymfm::ymfm_interface
     void reset()
     {
         memset(&this->vgm, 0, sizeof(this->vgm));
-        this->clocks.clear();
+        this->ym2612_clock = 0;
+        this->ym2612_present = false;
         this->ym2612.reset();
-        this->ym2612_queue.clear();
+        ym2612_queue_clear(&this->ym2612_queue);
     }
 
     bool load(const uint8_t* data, size_t size)
@@ -165,32 +233,32 @@ class VgmDriver : public ymfm::ymfm_interface
 
         bool detect_unsupported = false;
         bool detect_supported = false;
-        for (int i = 0x2C; i < 0xE8; i += 4) {
-            auto it = chips.find(i);
-            if (it != chips.end()) {
-                uint32_t clocks;
-                memcpy(&clocks, &data[it->first], 4);
-                if (clocks) {
-                    printf("Detected %s: clocks=%uHz ", it->second.c_str(), clocks);
-                    auto type = getChipType(it->second);
-                    if (type != ChipType::Unsupported) {
-                        printf("<supported>\n");
-                        this->clocks[type] = clocks;
-                        switch (type) {
-                            case ChipType::YM2612:
-                                vgm.step = 0x100000000ull / this->ym2612.sample_rate(clocks);
-                                break;
-                            case ChipType::Unsupported: break;
-                        }
-                        detect_supported = true;
-                    } else {
-                        printf("<unsupported!>\n");
-                        detect_unsupported = true;
+        for (int offset = 0x2C; offset < 0xE8; offset += 4) {
+            const ChipEntry* entry = find_chip_entry(offset);
+            if (entry == nullptr)
+                continue;
+            if ((size_t)(entry->offset + 4) > size)
+                continue;
+
+            uint32_t clocks = 0;
+            memcpy(&clocks, &data[entry->offset], 4);
+            if (clocks != 0) {
+                printf("Detected %s: clocks=%uHz ", entry->name, clocks);
+                if (entry->type != ChipType::Unsupported) {
+                    printf("<supported>\n");
+                    detect_supported = true;
+                    if (entry->type == ChipType::YM2612) {
+                        this->ym2612_clock = clocks;
+                        this->ym2612_present = true;
+                        vgm.step = 0x100000000ull / this->ym2612.sample_rate(clocks);
                     }
+                } else {
+                    printf("<unsupported!>\n");
+                    detect_unsupported = true;
                 }
             }
         }
-        if (detect_unsupported || !detect_supported) {
+        if (detect_unsupported || !detect_supported || !this->ym2612_present) {
             return false;
         }
 
@@ -214,47 +282,44 @@ class VgmDriver : public ymfm::ymfm_interface
             }
             vgm.wait--;
             buf[cursor] = 0;
-            if (2 <= this->channels) {
+            if (2 <= this->channels && (cursor + 1) < samples) {
                 buf[cursor + 1] = 0;
             }
-            for (auto it = this->clocks.begin(); it != this->clocks.end(); it++) {
-                switch (it->first) {
-                    case ChipType::YM2612: {
-                        uint32_t addr1 = 0xffff, addr2 = 0xffff;
-                        uint8_t data1 = 0, data2 = 0;
+            if (this->ym2612_present) {
+                uint32_t addr1 = 0xffff, addr2 = 0xffff;
+                uint8_t data1 = 0, data2 = 0;
 
-                        // see if there is data to be written; if so, extract it and dequeue
-                        if (!ym2612_queue.empty()) {
-                            auto front = ym2612_queue.front();
-                            addr1 = 0 + 2 * ((front.first >> 8) & 3);
-                            data1 = front.first & 0xff;
-                            addr2 = addr1 + 1;
-                            data2 = front.second;
-                            ym2612_queue.erase(ym2612_queue.begin());
-                        }
-
-                        // write to the chip
-                        if (addr1 != 0xffff) {
-                            ym2612.write(addr1, data1);
-                            ym2612.write(addr2, data2);
-                        }
-
-                        ymfm::ym2612::output_data out;
-                        for (; vgm.pos <= vgm.output_start; vgm.pos += vgm.step) {
-                            ym2612.generate(&out);
-                        }
-                        vgm.output_start += output_step;
-                        if (this->channels < 2) {
-                            buf[cursor++] += out.data[0]; // output left channel only (mono)
-                        } else {
-                            buf[cursor++] += out.data[0];
-                            buf[cursor++] += out.data[1];
-                        }
-                        break;
-                    }
-                    case ChipType::Unsupported:
-                        break;
+                if (!ym2612_queue_empty(&this->ym2612_queue)) {
+                    Ym2612QueueEntry front = ym2612_queue_front(&this->ym2612_queue);
+                    addr1 = 0 + 2 * ((front.reg >> 8) & 3);
+                    data1 = (uint8_t)(front.reg & 0xff);
+                    addr2 = addr1 + 1;
+                    data2 = front.data;
+                    ym2612_queue_pop(&this->ym2612_queue);
                 }
+
+                if (addr1 != 0xffff) {
+                    ym2612.write(addr1, data1);
+                    ym2612.write(addr2, data2);
+                }
+
+                ymfm::ym2612::output_data out;
+                for (; vgm.pos <= vgm.output_start; vgm.pos += vgm.step) {
+                    ym2612.generate(&out);
+                }
+                vgm.output_start += output_step;
+                if (this->channels < 2) {
+                    buf[cursor] += out.data[0];
+                    cursor += 1;
+                } else if ((cursor + 1) < samples) {
+                    buf[cursor] += out.data[0];
+                    buf[cursor + 1] += out.data[1];
+                    cursor += 2;
+                } else {
+                    cursor += 1;
+                }
+            } else {
+                cursor += (this->channels < 2) ? 1 : 2;
             }
         }
     }
@@ -276,7 +341,7 @@ class VgmDriver : public ymfm::ymfm_interface
                     // YM2612 port 0, write value dd to register aa
                     uint32_t reg = vgm.data[vgm.cursor++];
                     uint8_t data = vgm.data[vgm.cursor++];
-                    ym2612_queue.push_back(std::make_pair(reg, data));
+                    ym2612_queue_push(&this->ym2612_queue, reg, data);
                     break;
                 }
                 case 0x53:
@@ -284,7 +349,7 @@ class VgmDriver : public ymfm::ymfm_interface
                     // YM2612 port 1, write value dd to register aa
                     uint32_t reg = vgm.data[vgm.cursor++];
                     uint8_t data = vgm.data[vgm.cursor++];
-                    ym2612_queue.push_back(std::make_pair(reg | 0x100, data));
+                    ym2612_queue_push(&this->ym2612_queue, reg | 0x100, data);
                     break;
                 }
 
