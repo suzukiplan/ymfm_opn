@@ -75,19 +75,19 @@ struct ymfm_state_buffer
     size_t capacity;
 };
 
-inline void ymfm_state_buffer_init(ymfm_state_buffer& buffer)
+static inline void ymfm_state_buffer_init(ymfm_state_buffer& buffer)
 {
     buffer.data = nullptr;
     buffer.size = 0;
     buffer.capacity = 0;
 }
 
-inline void ymfm_state_buffer_clear(ymfm_state_buffer& buffer)
+static inline void ymfm_state_buffer_clear(ymfm_state_buffer& buffer)
 {
     buffer.size = 0;
 }
 
-inline void ymfm_state_buffer_free(ymfm_state_buffer& buffer)
+static inline void ymfm_state_buffer_free(ymfm_state_buffer& buffer)
 {
     if (buffer.data != nullptr) {
         free(buffer.data);
@@ -97,7 +97,7 @@ inline void ymfm_state_buffer_free(ymfm_state_buffer& buffer)
     buffer.capacity = 0;
 }
 
-inline int ymfm_state_buffer_push(ymfm_state_buffer& buffer, uint8_t value)
+static inline int ymfm_state_buffer_push(ymfm_state_buffer& buffer, uint8_t value)
 {
     if (buffer.size >= buffer.capacity) {
         size_t new_capacity = (buffer.capacity == 0) ? 64 : buffer.capacity * 2;
@@ -113,12 +113,12 @@ inline int ymfm_state_buffer_push(ymfm_state_buffer& buffer, uint8_t value)
     return 1;
 }
 
-inline size_t ymfm_state_buffer_size(const ymfm_state_buffer& buffer)
+static inline size_t ymfm_state_buffer_size(const ymfm_state_buffer& buffer)
 {
     return buffer.size;
 }
 
-inline uint8_t* ymfm_state_buffer_data(ymfm_state_buffer& buffer)
+static inline uint8_t* ymfm_state_buffer_data(ymfm_state_buffer& buffer)
 {
     return buffer.data;
 }
@@ -2821,7 +2821,7 @@ void opn_registers_base<IsOpnA>::save_restore(ymfm_saved_state& state)
 //-------------------------------------------------
 
 template <>
-void opn_registers_base<false>::operator_map(operator_mapping& dest) const
+inline void opn_registers_base<false>::operator_map(operator_mapping& dest) const
 {
     // Note that the channel index order is 0,2,1,3, so we bitswap the index.
     //
@@ -2840,7 +2840,7 @@ void opn_registers_base<false>::operator_map(operator_mapping& dest) const
 }
 
 template <>
-void opn_registers_base<true>::operator_map(operator_mapping& dest) const
+inline void opn_registers_base<true>::operator_map(operator_mapping& dest) const
 {
     // Note that the channel index order is 0,2,1,3, so we bitswap the index.
     //
@@ -3168,10 +3168,10 @@ const char* opn_registers_base<IsOpnA>::log_keyon(uint32_t choffs, uint32_t opof
 //  ym2612 - constructor
 //-------------------------------------------------
 
-ym2612::ym2612(ymfm_interface& intf) : m_address(0),
-                                       m_dac_data(0),
-                                       m_dac_enable(0),
-                                       m_fm(intf)
+inline ym2612::ym2612(ymfm_interface& intf) : m_address(0),
+                                              m_dac_data(0),
+                                              m_dac_enable(0),
+                                              m_fm(intf)
 {
 }
 
@@ -3179,7 +3179,7 @@ ym2612::ym2612(ymfm_interface& intf) : m_address(0),
 //  reset - reset the system
 //-------------------------------------------------
 
-void ym2612::reset()
+inline void ym2612::reset()
 {
     // reset the engines
     m_fm.reset();
@@ -3189,7 +3189,7 @@ void ym2612::reset()
 //  save_restore - save or restore the data
 //-------------------------------------------------
 
-void ym2612::save_restore(ymfm_saved_state& state)
+inline void ym2612::save_restore(ymfm_saved_state& state)
 {
     state.save_restore(m_address);
     state.save_restore(m_dac_data);
@@ -3201,7 +3201,7 @@ void ym2612::save_restore(ymfm_saved_state& state)
 //  read_status - read the status register
 //-------------------------------------------------
 
-uint8_t ym2612::read_status()
+inline uint8_t ym2612::read_status()
 {
     uint8_t result = m_fm.status();
     if (m_fm.intf().ymfm_is_busy())
@@ -3213,7 +3213,7 @@ uint8_t ym2612::read_status()
 //  read - handle a read from the device
 //-------------------------------------------------
 
-uint8_t ym2612::read(uint32_t offset)
+inline uint8_t ym2612::read(uint32_t offset)
 {
     uint8_t result = 0;
     switch (offset & 3) {
@@ -3235,7 +3235,7 @@ uint8_t ym2612::read(uint32_t offset)
 //  register
 //-------------------------------------------------
 
-void ym2612::write_address(uint8_t data)
+inline void ym2612::write_address(uint8_t data)
 {
     // just set the address
     m_address = data;
@@ -3246,7 +3246,7 @@ void ym2612::write_address(uint8_t data)
 //  register
 //-------------------------------------------------
 
-void ym2612::write_data(uint8_t data)
+inline void ym2612::write_data(uint8_t data)
 {
     // ignore if paired with upper address
     if (bitfield(m_address, 8))
@@ -3275,7 +3275,7 @@ void ym2612::write_data(uint8_t data)
 //  address register
 //-------------------------------------------------
 
-void ym2612::write_address_hi(uint8_t data)
+inline void ym2612::write_address_hi(uint8_t data)
 {
     // just set the address
     m_address = 0x100 | data;
@@ -3286,7 +3286,7 @@ void ym2612::write_address_hi(uint8_t data)
 //  data register
 //-------------------------------------------------
 
-void ym2612::write_data_hi(uint8_t data)
+inline void ym2612::write_data_hi(uint8_t data)
 {
     // ignore if paired with upper address
     if (!bitfield(m_address, 8))
@@ -3304,7 +3304,7 @@ void ym2612::write_data_hi(uint8_t data)
 //  interface
 //-------------------------------------------------
 
-void ym2612::write(uint32_t offset, uint8_t data)
+inline void ym2612::write(uint32_t offset, uint8_t data)
 {
     switch (offset & 3) {
         case 0: // address port
@@ -3329,7 +3329,7 @@ void ym2612::write(uint32_t offset, uint8_t data)
 //  generate - generate one sample of sound
 //-------------------------------------------------
 
-void ym2612::generate(output_data* output, uint32_t numsamples)
+inline void ym2612::generate(output_data* output, uint32_t numsamples)
 {
     for (uint32_t samp = 0; samp < numsamples; samp++, output++) {
         // clock the system
