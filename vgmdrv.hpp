@@ -126,7 +126,7 @@ class VgmDriver : public ymfm::ymfm_interface
     int channels;
 
   public:
-    VgmDriver(int samples, int channels) : ym2612(*this)
+    VgmDriver(int samples = 44100, int channels = 2) : ym2612(*this)
     {
         this->output_step = 0x100000000ull / samples;
         this->channels = channels;
