@@ -46,12 +46,12 @@
 
 #define YMFM_DEBUG_LOG_WAVFILES (0)
 
-#include <cassert>
-#include <cstdint>
-#include <cstdio>
-#include <cstring>
-#include <cstddef>
-#include <cstdlib>
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <stddef.h>
+#include <stdlib.h>
 
 namespace ymfm
 {
