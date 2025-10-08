@@ -45,7 +45,7 @@
 // we use an int64_t as emulated time, as a 32.32 fixed point value
 using emulated_time = int64_t;
 
-std::map<int, std::string> chips = {
+static std::map<int, std::string> chips = {
     {0x2C, "YM2612"},
     {0x30, "YM2151"},
     {0x38, "Sega_PCM"},
