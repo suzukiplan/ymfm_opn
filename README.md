@@ -80,6 +80,8 @@ Using the `afplay` command or similar tools to play `test.wav` will confirm that
 
 https://www.youtube.com/watch?v=1FBO5BiD1Fg
 
+> The above video is a capture of [test.fur](./test.fur) played in [Furnace Tracker](https://github.com/tildearrow/furnace).
+
 ## How to integrate to your Project
 
 Add [vgmdrv.hpp](./vgmdrv.hpp) and [ymfm_opn2.hpp](./ymfm_opn2.hpp) to your project and include them with `#include “vgmdrv.hpp”`.
