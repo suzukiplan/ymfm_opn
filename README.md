@@ -76,6 +76,10 @@ Detected YM2612: clocks=7670454Hz <supported>
 Writing a wav file...
 ```
 
+Using the `afplay` command or similar tools to play `test.wav` will confirm that the same music as in the video below plays:
+
+https://www.youtube.com/watch?v=1FBO5BiD1Fg
+
 ## How to integrate to your Project
 
 Add [vgmdrv.hpp](./vgmdrv.hpp) and [ymfm_opn2.hpp](./ymfm_opn2.hpp) to your project and include them with `#include “vgmdrv.hpp”`.
