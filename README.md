@@ -1,7 +1,9 @@
 # Extract an OPN2 from ymfm
 
 This code extracts only the classes necessary for emulating the OPN2 from [ymfm](https://github.com/aaronsgiles/ymfm/tree/17decfae857b92ab55fbb30ade2287ace095a381), and modifies it into a single-header format while including its dependency code.
- 
+
+Additionally, the ymfm implementation provided in this repository ([ymfm_opn2.hpp](./ymfm_opn2.hpp)) has been modified to use OpenAI's Codex (GPT-5) without C++ STL, so it should be usable even in a RaspberryPi bare-metal environment.
+
 ## How to use
 
 Check the [example.cpp](./example.cpp).
