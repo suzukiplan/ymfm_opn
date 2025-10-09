@@ -6,11 +6,15 @@ This code extracts only the classes necessary for emulating the OPN2 from [ymfm]
 
 Check the [example.cpp](./example.cpp).
 
+### 1. `#include`
+
 In [example.cpp](./example.cpp), include [vgmdrv.hpp](./vgmdrv.hpp) with `#include`,
 
 ```c++
 #include "vgmdrv.hpp"
 ```
+
+### 2. Create an instance
 
 After creating an instance of the `VgmDriver` class by specifying the sampling rate (typically 44100) and the number of channels (1: Mono, 2: Stereo),
 
@@ -20,6 +24,8 @@ const int channels = 1;
 VgmDriver vgmdrv(sampling_rate, channels);
 ```
 
+### 3. Load a `.vgm` file
+
 The `VgmDriver::load` method reads the .vgm file,
 
 ```c++
@@ -28,6 +34,8 @@ if (!vgmdrv.load(buf.data(), buf.size())) {
     return -2;
 }
 ```
+
+### 4. Render the samplies
 
 The `VgmDriver::render` method continues to acquire sample data in chunks of 4096 samples until it detects the end of the music data or a loop.
 
