@@ -46,18 +46,82 @@
 
 #define YMFM_DEBUG_LOG_WAVFILES (0)
 
-#include <cassert>
-#include <cstdint>
-#include <cstdio>
-#include <cstring>
-#include <algorithm>
-#include <array>
-#include <memory>
-#include <string>
-#include <vector>
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <stddef.h>
+#include <stdlib.h>
 
 namespace ymfm
 {
+
+template <typename T>
+inline T ymfm_max_value(T a, T b)
+{
+    return (a > b) ? a : b;
+}
+
+template <typename T>
+inline T ymfm_min_value(T a, T b)
+{
+    return (a < b) ? a : b;
+}
+
+struct ymfm_state_buffer
+{
+    uint8_t* data;
+    size_t size;
+    size_t capacity;
+};
+
+static inline void ymfm_state_buffer_init(ymfm_state_buffer& buffer)
+{
+    buffer.data = nullptr;
+    buffer.size = 0;
+    buffer.capacity = 0;
+}
+
+static inline void ymfm_state_buffer_clear(ymfm_state_buffer& buffer)
+{
+    buffer.size = 0;
+}
+
+static inline void ymfm_state_buffer_free(ymfm_state_buffer& buffer)
+{
+    if (buffer.data != nullptr) {
+        free(buffer.data);
+        buffer.data = nullptr;
+    }
+    buffer.size = 0;
+    buffer.capacity = 0;
+}
+
+static inline int ymfm_state_buffer_push(ymfm_state_buffer& buffer, uint8_t value)
+{
+    if (buffer.size >= buffer.capacity) {
+        size_t new_capacity = (buffer.capacity == 0) ? 64 : buffer.capacity * 2;
+        if (new_capacity <= buffer.size)
+            new_capacity = buffer.size + 1;
+        uint8_t* new_data = static_cast<uint8_t*>(realloc(buffer.data, new_capacity * sizeof(uint8_t)));
+        if (new_data == nullptr)
+            return 0;
+        buffer.data = new_data;
+        buffer.capacity = new_capacity;
+    }
+    buffer.data[buffer.size++] = value;
+    return 1;
+}
+
+static inline size_t ymfm_state_buffer_size(const ymfm_state_buffer& buffer)
+{
+    return buffer.size;
+}
+
+static inline uint8_t* ymfm_state_buffer_data(ymfm_state_buffer& buffer)
+{
+    return buffer.data;
+}
 
 //*********************************************************
 //  DEBUGGING
@@ -211,7 +275,7 @@ inline int16_t encode_fp(int32_t value)
     int exponent = 7 - count_leading_zeros(scanvalue << 17);
 
     // smallest exponent value allowed is 1
-    exponent = std::max(exponent, 1);
+    exponent = ymfm_max_value(exponent, 1);
 
     // mantissa
     int32_t mantissa = value >> (exponent - 1);
@@ -255,7 +319,7 @@ inline int16_t roundtrip_fp(int32_t value)
     int exponent = 7 - count_leading_zeros(scanvalue << 17);
 
     // smallest exponent value allowed is 1
-    exponent = std::max(exponent, 1);
+    exponent = ymfm_max_value(exponent, 1);
 
     // apply the shift back and forth to zero out bits that are lost
     exponent -= 1;
@@ -326,17 +390,17 @@ struct ymfm_output {
 
 // ======================> ymfm_saved_state
 
-// this class contains a managed vector of bytes that is used to save and
+// this class contains a managed buffer of bytes that is used to save and
 // restore state
 class ymfm_saved_state
 {
   public:
     // construction
-    ymfm_saved_state(std::vector<uint8_t>& buffer, bool saving) : m_buffer(buffer),
-                                                                  m_offset(saving ? -1 : 0)
+    ymfm_saved_state(ymfm_state_buffer& buffer, bool saving) : m_buffer(buffer),
+                                                               m_offset(saving ? -1 : 0)
     {
         if (saving)
-            buffer.resize(0);
+            ymfm_state_buffer_clear(m_buffer);
     }
 
     // are we saving or restoring?
@@ -406,13 +470,17 @@ class ymfm_saved_state
     // internal helper
     ymfm_saved_state& write(uint8_t data)
     {
-        m_buffer.push_back(data);
+        ymfm_state_buffer_push(m_buffer, data);
         return *this;
     }
-    uint8_t read() { return (m_offset < int32_t(m_buffer.size())) ? m_buffer[m_offset++] : 0; }
+    uint8_t read()
+    {
+        size_t buffer_size = ymfm_state_buffer_size(m_buffer);
+        return (m_offset < int32_t(buffer_size)) ? ymfm_state_buffer_data(m_buffer)[m_offset++] : 0;
+    }
 
     // internal state
-    std::vector<uint8_t>& m_buffer;
+    ymfm_state_buffer& m_buffer;
     int32_t m_offset;
 };
 
@@ -620,7 +688,7 @@ class fm_registers_base
     // raw value is 0, and clamping to 63
     static constexpr uint32_t effective_rate(uint32_t rawrate, uint32_t ksr)
     {
-        return (rawrate == 0) ? 0 : std::min<uint32_t>(rawrate + ksr, 63);
+        return (rawrate == 0) ? 0 : ymfm_min_value<uint32_t>(rawrate + ksr, 63);
     }
 };
 
@@ -741,7 +809,7 @@ class fm_channel
     // assign operators
     void assign(uint32_t index, fm_operator<RegisterType>* op)
     {
-        assert(index < m_op.size());
+        assert(index < 4);
         m_op[index] = op;
         if (op != nullptr)
             op->set_choffs(m_choffs);
@@ -804,7 +872,7 @@ class fm_channel
     uint32_t m_choffs;                              // channel offset in registers
     int16_t m_feedback[2];                          // feedback memory for operator 1
     mutable int16_t m_feedback_in;                  // next input value for op 1 feedback (set in output)
-    std::array<fm_operator<RegisterType>*, 4> m_op; // up to 4 operators
+    fm_operator<RegisterType>* m_op[4];             // up to 4 operators
     RegisterType& m_regs;                           // direct reference to registers
     fm_engine_base<RegisterType>& m_owner;          // reference to the owning engine
 };
@@ -835,6 +903,9 @@ class fm_engine_base : public ymfm_engine_callbacks
 
     // constructor
     fm_engine_base(ymfm_interface& intf);
+
+    // destructor
+    ~fm_engine_base();
 
     // save/restore
     void save_restore(ymfm_saved_state& state);
@@ -895,8 +966,8 @@ class fm_engine_base : public ymfm_engine_callbacks
     void invalidate_caches() { m_modified_channels = RegisterType::ALL_CHANNELS; }
 
     // simple getters for debugging
-    fm_channel<RegisterType>* debug_channel(uint32_t index) const { return m_channel[index].get(); }
-    fm_operator<RegisterType>* debug_operator(uint32_t index) const { return m_operator[index].get(); }
+    fm_channel<RegisterType>* debug_channel(uint32_t index) const { return m_channel[index]; }
+    fm_operator<RegisterType>* debug_operator(uint32_t index) const { return m_operator[index]; }
 
   public:
     // timer callback; called by the interface when a timer fires
@@ -928,8 +999,8 @@ class fm_engine_base : public ymfm_engine_callbacks
     uint32_t m_modified_channels;                                     // mask of channels that have been modified
     uint32_t m_prepare_count;                                         // counter to do periodic prepare sweeps
     RegisterType m_regs;                                              // register accessor
-    std::unique_ptr<fm_channel<RegisterType>> m_channel[CHANNELS];    // channel pointers
-    std::unique_ptr<fm_operator<RegisterType>> m_operator[OPERATORS]; // operator pointers
+    fm_channel<RegisterType>* m_channel[CHANNELS];    // channel pointers
+    fm_operator<RegisterType>* m_operator[OPERATORS]; // operator pointers
 #if (YMFM_DEBUG_LOG_WAVFILES)
     mutable ymfm_wavfile<1> m_wavfile[CHANNELS]; // for debugging
 #endif
@@ -1641,7 +1712,7 @@ uint32_t fm_operator<RegisterType>::envelope_attenuation(uint32_t am_offset) con
     result += m_cache.total_level;
 
     // clamp to max, apply shift, and return
-    return std::min<uint32_t>(result, 0x3ff);
+    return ymfm_min_value<uint32_t>(result, 0x3ff);
 }
 
 //*********************************************************
@@ -1693,14 +1764,14 @@ void fm_channel<RegisterType>::save_restore(ymfm_saved_state& state)
 template <class RegisterType>
 void fm_channel<RegisterType>::keyonoff(uint32_t states, keyon_type type, uint32_t chnum)
 {
-    for (uint32_t opnum = 0; opnum < m_op.size(); opnum++)
+    for (uint32_t opnum = 0; opnum < 4; opnum++)
         if (m_op[opnum] != nullptr)
             m_op[opnum]->keyonoff(bitfield(states, opnum), type);
 
     if (debug::LOG_KEYON_EVENTS && ((debug::GLOBAL_FM_CHANNEL_MASK >> chnum) & 1) != 0)
-        for (uint32_t opnum = 0; opnum < m_op.size(); opnum++)
+        for (uint32_t opnum = 0; opnum < 4; opnum++)
             if (m_op[opnum] != nullptr)
-                debug::log_keyon("%c%s\n", bitfield(states, opnum) ? '+' : '-', m_regs.log_keyon(m_choffs, m_op[opnum]->opoffs()).c_str());
+                debug::log_keyon("%c%s\n", bitfield(states, opnum) ? '+' : '-', m_regs.log_keyon(m_choffs, m_op[opnum]->opoffs()));
 }
 
 //-------------------------------------------------
@@ -1713,7 +1784,7 @@ bool fm_channel<RegisterType>::prepare()
     uint32_t active_mask = 0;
 
     // prepare all operators and determine if they are active
-    for (uint32_t opnum = 0; opnum < m_op.size(); opnum++)
+    for (uint32_t opnum = 0; opnum < 4; opnum++)
         if (m_op[opnum] != nullptr)
             if (m_op[opnum]->prepare())
                 active_mask |= 1 << opnum;
@@ -1732,7 +1803,7 @@ void fm_channel<RegisterType>::clock(uint32_t env_counter, int32_t lfo_raw_pm)
     m_feedback[0] = m_feedback[1];
     m_feedback[1] = m_feedback_in;
 
-    for (uint32_t opnum = 0; opnum < m_op.size(); opnum++)
+    for (uint32_t opnum = 0; opnum < 4; opnum++)
         if (m_op[opnum] != nullptr)
             m_op[opnum]->clock(env_counter, lfo_raw_pm);
 
@@ -2033,13 +2104,18 @@ fm_engine_base<RegisterType>::fm_engine_base(ymfm_interface& intf) : m_intf(intf
     // inform the interface of their engine
     m_intf.m_engine = this;
 
+    for (uint32_t chnum = 0; chnum < CHANNELS; chnum++)
+        m_channel[chnum] = nullptr;
+    for (uint32_t opnum = 0; opnum < OPERATORS; opnum++)
+        m_operator[opnum] = nullptr;
+
     // create the channels
     for (uint32_t chnum = 0; chnum < CHANNELS; chnum++)
-        m_channel[chnum] = std::make_unique<fm_channel<RegisterType>>(*this, RegisterType::channel_offset(chnum));
+        m_channel[chnum] = new fm_channel<RegisterType>(*this, RegisterType::channel_offset(chnum));
 
     // create the operators
     for (uint32_t opnum = 0; opnum < OPERATORS; opnum++)
-        m_operator[opnum] = std::make_unique<fm_operator<RegisterType>>(*this, RegisterType::operator_offset(opnum));
+        m_operator[opnum] = new fm_operator<RegisterType>(*this, RegisterType::operator_offset(opnum));
 
 #if (YMFM_DEBUG_LOG_WAVFILES)
     for (uint32_t chnum = 0; chnum < CHANNELS; chnum++)
@@ -2048,6 +2124,27 @@ fm_engine_base<RegisterType>::fm_engine_base(ymfm_interface& intf) : m_intf(intf
 
     // do the initial operator assignment
     assign_operators();
+}
+
+//-------------------------------------------------
+//  fm_engine_base - destructor
+//-------------------------------------------------
+
+template <class RegisterType>
+fm_engine_base<RegisterType>::~fm_engine_base()
+{
+    for (uint32_t chnum = 0; chnum < CHANNELS; chnum++) {
+        if (m_channel[chnum] != nullptr) {
+            delete m_channel[chnum];
+            m_channel[chnum] = nullptr;
+        }
+    }
+    for (uint32_t opnum = 0; opnum < OPERATORS; opnum++) {
+        if (m_operator[opnum] != nullptr) {
+            delete m_operator[opnum];
+            m_operator[opnum] = nullptr;
+        }
+    }
 }
 
 //-------------------------------------------------
@@ -2068,12 +2165,14 @@ void fm_engine_base<RegisterType>::reset()
     write(RegisterType::REG_MODE, 0);
 
     // reset the channels
-    for (auto& chan : m_channel)
-        chan->reset();
+    for (uint32_t chnum = 0; chnum < CHANNELS; chnum++)
+        if (m_channel[chnum] != nullptr)
+            m_channel[chnum]->reset();
 
     // reset the operators
-    for (auto& op : m_operator)
-        op->reset();
+    for (uint32_t opnum = 0; opnum < OPERATORS; opnum++)
+        if (m_operator[opnum] != nullptr)
+            m_operator[opnum]->reset();
 }
 
 //-------------------------------------------------
@@ -2281,7 +2380,7 @@ void fm_engine_base<RegisterType>::assign_operators()
     for (uint32_t chnum = 0; chnum < CHANNELS; chnum++)
         for (uint32_t index = 0; index < 4; index++) {
             uint32_t opnum = bitfield(map.chan[chnum], 8 * index, 8);
-            m_channel[chnum]->assign(index, (opnum == 0xff) ? nullptr : m_operator[opnum].get());
+            m_channel[chnum]->assign(index, (opnum == 0xff) ? nullptr : m_operator[opnum]);
         }
 }
 
@@ -2555,7 +2654,7 @@ class opn_registers_base : public fm_registers_base
     uint32_t compute_phase_step(uint32_t choffs, uint32_t opoffs, opdata_cache const& cache, int32_t lfo_raw_pm);
 
     // log a key-on event
-    std::string log_keyon(uint32_t choffs, uint32_t opoffs);
+    const char* log_keyon(uint32_t choffs, uint32_t opoffs);
 
     // system-wide registers
     uint32_t test() const { return byte(0x21, 0, 8); }
@@ -2693,7 +2792,8 @@ opn_registers_base<IsOpnA>::opn_registers_base() : m_lfo_counter(0),
 template <bool IsOpnA>
 void opn_registers_base<IsOpnA>::reset()
 {
-    std::fill_n(&m_regdata[0], REGISTERS, 0);
+    for (uint32_t index = 0; index < REGISTERS; index++)
+        m_regdata[index] = 0;
     if (IsOpnA) {
         // enable output on both channels by default
         m_regdata[0xb4] = m_regdata[0xb5] = m_regdata[0xb6] = 0xc0;
@@ -2721,7 +2821,7 @@ void opn_registers_base<IsOpnA>::save_restore(ymfm_saved_state& state)
 //-------------------------------------------------
 
 template <>
-void opn_registers_base<false>::operator_map(operator_mapping& dest) const
+inline void opn_registers_base<false>::operator_map(operator_mapping& dest) const
 {
     // Note that the channel index order is 0,2,1,3, so we bitswap the index.
     //
@@ -2740,7 +2840,7 @@ void opn_registers_base<false>::operator_map(operator_mapping& dest) const
 }
 
 template <>
-void opn_registers_base<true>::operator_map(operator_mapping& dest) const
+inline void opn_registers_base<true>::operator_map(operator_mapping& dest) const
 {
     // Note that the channel index order is 0,2,1,3, so we bitswap the index.
     //
@@ -3006,7 +3106,7 @@ uint32_t opn_registers_base<IsOpnA>::compute_phase_step(uint32_t choffs, uint32_
 //-------------------------------------------------
 
 template <bool IsOpnA>
-std::string opn_registers_base<IsOpnA>::log_keyon(uint32_t choffs, uint32_t opoffs)
+const char* opn_registers_base<IsOpnA>::log_keyon(uint32_t choffs, uint32_t opoffs)
 {
     uint32_t chnum = (choffs & 3) + 3 * bitfield(choffs, 8);
     uint32_t opnum = (opoffs & 15) - ((opoffs & 15) / 4) + 12 * bitfield(opoffs, 8);
@@ -3021,8 +3121,9 @@ std::string opn_registers_base<IsOpnA>::log_keyon(uint32_t choffs, uint32_t opof
             block_freq = multi_block_freq(0);
     }
 
-    char buffer[256];
+    static char buffer[256];
     int end = 0;
+    buffer[0] = '\0';
 
     end += snprintf(&buffer[end], sizeof(buffer) - end, "%u.%02u freq=%04X dt=%u fb=%u alg=%X mul=%X tl=%02X ksr=%u adsr=%02X/%02X/%02X/%X sl=%X",
                     chnum, opnum,
@@ -3067,10 +3168,10 @@ std::string opn_registers_base<IsOpnA>::log_keyon(uint32_t choffs, uint32_t opof
 //  ym2612 - constructor
 //-------------------------------------------------
 
-ym2612::ym2612(ymfm_interface& intf) : m_address(0),
-                                       m_dac_data(0),
-                                       m_dac_enable(0),
-                                       m_fm(intf)
+inline ym2612::ym2612(ymfm_interface& intf) : m_address(0),
+                                              m_dac_data(0),
+                                              m_dac_enable(0),
+                                              m_fm(intf)
 {
 }
 
@@ -3078,7 +3179,7 @@ ym2612::ym2612(ymfm_interface& intf) : m_address(0),
 //  reset - reset the system
 //-------------------------------------------------
 
-void ym2612::reset()
+inline void ym2612::reset()
 {
     // reset the engines
     m_fm.reset();
@@ -3088,7 +3189,7 @@ void ym2612::reset()
 //  save_restore - save or restore the data
 //-------------------------------------------------
 
-void ym2612::save_restore(ymfm_saved_state& state)
+inline void ym2612::save_restore(ymfm_saved_state& state)
 {
     state.save_restore(m_address);
     state.save_restore(m_dac_data);
@@ -3100,7 +3201,7 @@ void ym2612::save_restore(ymfm_saved_state& state)
 //  read_status - read the status register
 //-------------------------------------------------
 
-uint8_t ym2612::read_status()
+inline uint8_t ym2612::read_status()
 {
     uint8_t result = m_fm.status();
     if (m_fm.intf().ymfm_is_busy())
@@ -3112,7 +3213,7 @@ uint8_t ym2612::read_status()
 //  read - handle a read from the device
 //-------------------------------------------------
 
-uint8_t ym2612::read(uint32_t offset)
+inline uint8_t ym2612::read(uint32_t offset)
 {
     uint8_t result = 0;
     switch (offset & 3) {
@@ -3134,7 +3235,7 @@ uint8_t ym2612::read(uint32_t offset)
 //  register
 //-------------------------------------------------
 
-void ym2612::write_address(uint8_t data)
+inline void ym2612::write_address(uint8_t data)
 {
     // just set the address
     m_address = data;
@@ -3145,7 +3246,7 @@ void ym2612::write_address(uint8_t data)
 //  register
 //-------------------------------------------------
 
-void ym2612::write_data(uint8_t data)
+inline void ym2612::write_data(uint8_t data)
 {
     // ignore if paired with upper address
     if (bitfield(m_address, 8))
@@ -3174,7 +3275,7 @@ void ym2612::write_data(uint8_t data)
 //  address register
 //-------------------------------------------------
 
-void ym2612::write_address_hi(uint8_t data)
+inline void ym2612::write_address_hi(uint8_t data)
 {
     // just set the address
     m_address = 0x100 | data;
@@ -3185,7 +3286,7 @@ void ym2612::write_address_hi(uint8_t data)
 //  data register
 //-------------------------------------------------
 
-void ym2612::write_data_hi(uint8_t data)
+inline void ym2612::write_data_hi(uint8_t data)
 {
     // ignore if paired with upper address
     if (!bitfield(m_address, 8))
@@ -3203,7 +3304,7 @@ void ym2612::write_data_hi(uint8_t data)
 //  interface
 //-------------------------------------------------
 
-void ym2612::write(uint32_t offset, uint8_t data)
+inline void ym2612::write(uint32_t offset, uint8_t data)
 {
     switch (offset & 3) {
         case 0: // address port
@@ -3228,7 +3329,7 @@ void ym2612::write(uint32_t offset, uint8_t data)
 //  generate - generate one sample of sound
 //-------------------------------------------------
 
-void ym2612::generate(output_data* output, uint32_t numsamples)
+inline void ym2612::generate(output_data* output, uint32_t numsamples)
 {
     for (uint32_t samp = 0; samp < numsamples; samp++, output++) {
         // clock the system
