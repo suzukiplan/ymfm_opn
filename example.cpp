@@ -1,150 +1,95 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <array>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <iterator>
+#include <string>
+#include <vector>
 #include "vgmdrv.hpp"
 
-typedef struct {
-    char riff[4];
-    unsigned int fsize;
-    char wave[4];
-    char fmt[4];
-    unsigned int bnum;
-    unsigned short fid;
-    unsigned short ch;
-    unsigned int sample;
-    unsigned int bps;
-    unsigned short bsize;
-    unsigned short bits;
-    char data[4];
-    unsigned int dsize;
-} WavHeader;
+namespace
+{
+
+struct WavHeader {
+    std::array<char, 4> riff{'R', 'I', 'F', 'F'};
+    std::uint32_t file_size{};
+    std::array<char, 4> wave{'W', 'A', 'V', 'E'};
+    std::array<char, 4> fmt{'f', 'm', 't', ' '};
+    std::uint32_t fmt_size{16};
+    std::uint16_t audio_format{1};
+    std::uint16_t channels{};
+    std::uint32_t sample_rate{};
+    std::uint32_t byte_rate{};
+    std::uint16_t block_align{};
+    std::uint16_t bits_per_sample{16};
+    std::array<char, 4> data{'d', 'a', 't', 'a'};
+    std::uint32_t data_size{};
+};
+
+auto load_file(const std::filesystem::path& path)
+{
+    std::ifstream file(path, std::ios::binary);
+    if (!file) throw std::runtime_error("failed to open " + path.string());
+    return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(file), {});
+}
+
+void write_wav(const std::filesystem::path& path, const std::vector<std::int16_t>& samples, int channels, int sample_rate)
+{
+    WavHeader header{};
+    header.channels = static_cast<std::uint16_t>(channels);
+    header.sample_rate = static_cast<std::uint32_t>(sample_rate);
+    header.block_align = static_cast<std::uint16_t>(channels * sizeof(std::int16_t));
+    header.byte_rate = header.sample_rate * header.block_align;
+    header.data_size = static_cast<std::uint32_t>(samples.size() * sizeof(std::int16_t));
+    header.file_size = header.data_size + sizeof(WavHeader) - 8;
+
+    std::ofstream out(path, std::ios::binary);
+    if (!out) throw std::runtime_error("failed to open " + path.string());
+    out.write(reinterpret_cast<const char*>(&header), sizeof(header));
+    out.write(reinterpret_cast<const char*>(samples.data()), static_cast<std::streamsize>(samples.size() * sizeof(std::int16_t)));
+    if (!out) throw std::runtime_error("failed to write wav data");
+}
+
+} // namespace
 
 int main(int argc, char* argv[])
 {
-    if (argc < 3) {
-        puts("usage: example /path/to/file.vgm /path/to/output.wav");
+    try {
+        if (argc < 3) {
+            std::cerr << "usage: example /path/to/file.vgm /path/to/output.wav\n";
+            return 1;
+        }
+
+        const std::filesystem::path input{argv[1]};
+        const std::filesystem::path output{argv[2]};
+
+        const auto data = load_file(input);
+
+        constexpr int sampling_rate = 44100;
+        constexpr int channels = 1;
+
+        VgmDriver driver(sampling_rate, channels);
+        if (!driver.load(data.data(), data.size())) {
+            std::cerr << "Load failed\n";
+            return 2;
+        }
+
+        std::vector<std::int16_t> audio;
+        audio.reserve(1'000'000);
+        std::array<std::int16_t, 4096> block{};
+
+        while (driver.getLoopCount() == 0 && !driver.isEnded()) {
+            driver.render(block.data(), static_cast<int>(block.size()));
+            audio.insert(audio.end(), block.begin(), block.end());
+        }
+
+        std::cout << audio.size() << " samples generated.\n";
+        std::cout << "Writing " << output << "...\n";
+        write_wav(output, audio, channels, sampling_rate);
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << '\n';
         return 1;
     }
-    FILE* in = fopen(argv[1], "rb");
-    if (!in) {
-        puts("File open error!");
-        return -1;
-    }
-    if (fseek(in, 0, SEEK_END) != 0) {
-        fclose(in);
-        puts("File seek error!");
-        return -1;
-    }
-    long file_size_long = ftell(in);
-    if (file_size_long < 0) {
-        fclose(in);
-        puts("File size error!");
-        return -1;
-    }
-    if (fseek(in, 0, SEEK_SET) != 0) {
-        fclose(in);
-        puts("File seek error!");
-        return -1;
-    }
-    size_t file_size = (size_t)file_size_long;
-    uint8_t* buf = (uint8_t*)malloc(file_size);
-    if (!buf) {
-        fclose(in);
-        puts("Memory allocation error!");
-        return -1;
-    }
-    size_t read_size = fread(buf, 1, file_size, in);
-    fclose(in);
-    if (read_size != file_size) {
-        free(buf);
-        puts("File read error!");
-        return -1;
-    }
-
-    const int sampling_rate = 44100;
-    const int channels = 1;
-    VgmDriver vgmdrv(sampling_rate, channels);
-    if (!vgmdrv.load(buf, file_size)) {
-        free(buf);
-        puts("Load failed!");
-        return -2;
-    }
-
-    int16_t* wav = NULL;
-    size_t wav_size = 0;
-    size_t wav_capacity = 0;
-    while (0 == vgmdrv.getLoopCount() && !vgmdrv.isEnded()) {
-        int16_t work[4096];
-        size_t frame_count = sizeof(work) / sizeof(work[0]);
-        vgmdrv.render(work, (int)frame_count);
-
-        size_t required = wav_size + frame_count;
-        if (required > wav_capacity) {
-            size_t new_capacity = (wav_capacity == 0) ? frame_count : wav_capacity;
-            while (new_capacity < required) {
-                new_capacity *= 2;
-            }
-            int16_t* new_buffer = (int16_t*)realloc(wav, new_capacity * sizeof(int16_t));
-            if (!new_buffer) {
-                free(wav);
-                free(buf);
-                puts("Memory allocation error!");
-                return -3;
-            }
-            wav = new_buffer;
-            wav_capacity = new_capacity;
-        }
-
-        memcpy(wav + wav_size, work, frame_count * sizeof(int16_t));
-        wav_size += frame_count;
-    }
-    printf("%zu samples generated.\n", wav_size);
-
-    puts("Writing a wav file...");
-    WavHeader wh;
-    memset(&wh, 0, sizeof(wh));
-    strncpy(wh.riff, "RIFF", 4);
-    strncpy(wh.wave, "WAVE", 4);
-    strncpy(wh.fmt, "fmt ", 4);
-    strncpy(wh.data, "data", 4);
-    wh.bnum = 16;
-    wh.fid = 1;
-    wh.ch = channels;
-    wh.sample = sampling_rate;
-    wh.bsize = 2;
-    wh.bits = 16;
-    wh.bps = wh.sample * wh.ch * (wh.bits / 8);
-    wh.dsize = wav_size * sizeof(int16_t);
-    wh.fsize = wh.dsize + sizeof(wh) - 8;
-
-    FILE* fw = fopen(argv[2], "wb");
-    if (!fw) {
-        free(wav);
-        free(buf);
-        puts("File open error!");
-        return -1;
-    }
-    if (fwrite(&wh, 1, sizeof(wh), fw) != sizeof(wh)) {
-        fclose(fw);
-        free(wav);
-        free(buf);
-        puts("File write error!");
-        return -1;
-    }
-    if (wav_size > 0) {
-        size_t written = fwrite(wav, sizeof(int16_t), wav_size, fw);
-        if (written != wav_size) {
-            fclose(fw);
-            free(wav);
-            free(buf);
-            puts("File write error!");
-            return -1;
-        }
-    }
-    fclose(fw);
-
-    free(wav);
-    free(buf);
-
-    return 0;
 }
